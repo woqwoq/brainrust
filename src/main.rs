@@ -54,44 +54,112 @@ impl Tokenizer {
     }
 }
 
+const DEFAULT_TAPE_SIZE: usize = 30000;
+
 struct Interpreter {
-    pc: u8,
+    program_counter: usize,
     instructions: Vec<Token>,
-    tape: [u8; 256],
-    memory_pointer: u8,
+    memory_pointer: usize,
+    memory: [u8; DEFAULT_TAPE_SIZE],
 }
 
 impl Interpreter {
     pub fn new(instructions: &str) -> Self {
         Interpreter {
-            pc: 0u8,
+            program_counter: 0,
             instructions: Tokenizer::tokenize(instructions),
-            memory_pointer: 0u8,
-            tape: [0u8; 256],
+            memory_pointer: 0,
+            memory: [0u8; DEFAULT_TAPE_SIZE],
         }
     }
 
     pub fn handle_move_left(&mut self) {
         let (res, ovf) = self.memory_pointer.overflowing_sub(1);
         if ovf {
-            panic!("Memory tape pointer left allowed bounds on pc={}", self.pc)
+            panic!(
+                "Memory tape pointer left allowed bounds on pc={}",
+                self.program_counter
+            )
         }
 
         self.memory_pointer = res
     }
 
     pub fn handle_move_right(&mut self) {
-        self.memory_pointer += 1;
+        let (res, ovf) = self.memory_pointer.overflowing_add(1);
+        if ovf {
+            panic!(
+                "Memory tape pointer left allowed bounds on pc={}",
+                self.program_counter
+            )
+        }
+
+        self.memory_pointer = res
+    }
+
+    pub fn handle_increment(&mut self) {
+        let memory_value = self.fetch_memory_mut(self.memory_pointer);
+        *memory_value += 1
+    }
+
+    pub fn handle_decrement(&mut self) {
+        let memory_value = self.fetch_memory_mut(self.memory_pointer);
+        *memory_value -= 1
+    }
+
+    pub fn handle_output(&self) {
+        let memory_val_ascii =
+            char::from_u32(*self.fetch_memory(self.memory_pointer) as u32).unwrap();
+        print!("{}", memory_val_ascii)
     }
 
     pub fn fetch_instruction(&self) -> Option<Token> {
-        self.instructions.get(self.pc as usize).cloned()
+        self.instructions.get(self.program_counter).cloned()
+    }
+
+    pub fn fetch_memory(&self, index: usize) -> &u8 {
+        if self.memory.len() < index {
+            panic!(
+                "Trying to access memory at cell={} while DEFAULT_TAPE_SIZE={}",
+                index, DEFAULT_TAPE_SIZE
+            )
+        }
+
+        if let Some(memory_value) = self.memory.get(self.memory_pointer) {
+            memory_value
+        } else {
+            panic!(
+                "Cannot acces value at tape position={} during executing instruction at pc={}",
+                self.memory_pointer, self.program_counter
+            )
+        }
+    }
+
+    pub fn fetch_memory_mut(&mut self, index: usize) -> &mut u8 {
+        if self.memory.len() < index {
+            panic!(
+                "Trying to access memory at cell={} while DEFAULT_TAPE_SIZE={}",
+                index, DEFAULT_TAPE_SIZE
+            )
+        }
+
+        if let Some(memory_value) = self.memory.get_mut(self.memory_pointer) {
+            memory_value
+        } else {
+            panic!(
+                "Cannot acces value at tape position={} during executing instruction at pc={}",
+                self.memory_pointer, self.program_counter
+            )
+        }
     }
 
     pub fn execute_instruction(&mut self, instruction: Token) {
         match instruction {
             Token::MoveLeft => self.handle_move_left(),
             Token::MoveRight => self.handle_move_right(),
+            Token::Increment => self.handle_increment(),
+            Token::Decrement => self.handle_decrement(),
+            Token::Output => self.handle_output(),
             _ => todo!("Only 2 instructions currently supported"),
         }
     }
@@ -99,14 +167,14 @@ impl Interpreter {
     pub fn step(&mut self) {
         if let Some(instruction) = self.fetch_instruction() {
             self.execute_instruction(instruction);
-            self.pc += 1;
+            self.program_counter += 1;
         } else {
-            panic!("Failed to fetch instruction at pc={}", self.pc) // not expected
+            panic!("Failed to fetch instruction at pc={}", self.program_counter) // not expected
         }
     }
 
     pub fn run(&mut self) {
-        while self.instructions.len() > (self.pc as usize) {
+        while self.instructions.len() > self.program_counter {
             self.step();
         }
     }
@@ -117,13 +185,22 @@ impl fmt::Display for Interpreter {
         write!(
             f,
             "PC: {}\nMemory Pointer: {}",
-            self.pc, self.memory_pointer
+            self.program_counter, self.memory_pointer
         )
     }
 }
 fn main() {
-    let code = ">>><<<<";
-    let mut bf: Interpreter = Interpreter::new(code);
+    let mut code = String::from("");
+    for _ in 0..65 {
+        code.push('+');
+    }
+    code.push('.');
+    code.push('>');
+    for _ in 0..66 {
+        code.push('+');
+    }
+    code.push_str(".<+.>+.");
+    let mut bf: Interpreter = Interpreter::new(&code);
 
     bf.run();
 }
