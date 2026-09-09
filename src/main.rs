@@ -1,8 +1,11 @@
+use core::panic;
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fmt,
     io::{self, Write},
 };
+
+const DEFAULT_TAPE_SIZE: usize = 15;
 
 #[derive(Debug, PartialEq, Clone)]
 enum Token {
@@ -17,17 +20,44 @@ enum Token {
     Comment(String),
 }
 
+struct JumpTable {}
+impl JumpTable {
+    pub fn from(tokens: Vec<Token>) -> HashMap<usize, usize> {
+        let mut stack: Vec<usize> = Vec::new();
+        let mut jump_table = HashMap::new();
+
+        for (i, token) in tokens.iter().enumerate() {
+            match token {
+                Token::LoopStart => stack.push(i),
+                Token::LoopClose => {
+                    if let Some(n) = stack.last() {
+                        jump_table.insert(*n, i);
+                        jump_table.insert(i, *n);
+                        stack.pop();
+                    } else {
+                        panic!("Unmatched ']' at position={}", i)
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !stack.is_empty() {
+            panic!("Unmatched '[' at positions={:?}", stack);
+        }
+
+        jump_table
+    }
+}
+
 struct Tokenizer {}
 impl Tokenizer {
     pub fn tokenize(input: &str) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
-        let chars = input.chars();
 
         let mut comment_buffer = String::new();
         let mut dump_comment;
 
-        let chars_iter = chars.into_iter();
-        for char in chars_iter {
+        for char in input.chars() {
             dump_comment = true;
             let current_tokent = match char {
                 '<' => Some(Token::MoveLeft),
@@ -58,25 +88,23 @@ impl Tokenizer {
     }
 }
 
-const DEFAULT_TAPE_SIZE: usize = 15;
-
 struct Interpreter {
     program_counter: usize,
     instructions: Vec<Token>,
     memory_pointer: usize,
     memory: [u8; DEFAULT_TAPE_SIZE],
-
-    loop_starts: HashSet<usize>,
+    jump_table: HashMap<usize, usize>,
 }
 
 impl Interpreter {
     pub fn new(instructions: &str) -> Self {
+        let tokens = Tokenizer::tokenize(instructions);
         Interpreter {
             program_counter: 0,
-            instructions: Tokenizer::tokenize(instructions),
+            instructions: tokens.clone(),
             memory_pointer: 0,
             memory: [0u8; DEFAULT_TAPE_SIZE],
-            loop_starts: HashSet::new(),
+            jump_table: JumpTable::from(tokens),
         }
     }
 
@@ -110,14 +138,14 @@ impl Interpreter {
 
     pub fn handle_increment(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
-        *memory_value += 1;
+        *memory_value = memory_value.wrapping_add(1);
 
         self.program_counter += 1;
     }
 
     pub fn handle_decrement(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
-        *memory_value -= 1;
+        *memory_value = memory_value.wrapping_sub(1);
 
         self.program_counter += 1;
     }
@@ -143,33 +171,25 @@ impl Interpreter {
         self.program_counter += 1;
     }
 
-    fn jump_to_closest_loop_close(&mut self) {
-        while self.fetch_instruction().unwrap() != Token::LoopClose {
-            self.program_counter += 1;
-        }
+    fn jump_to_closest_bracket(&mut self) {
+        self.program_counter = *self.jump_table.get(&self.program_counter).unwrap();
     }
 
     pub fn handle_loop_start(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
 
         if *memory_value == 0 {
-            self.jump_to_closest_loop_close();
+            self.jump_to_closest_bracket();
         }
 
         self.program_counter += 1;
-    }
-
-    fn jump_to_closest_loop_start(&mut self) {
-        while self.fetch_instruction().unwrap() != Token::LoopStart {
-            self.program_counter -= 1;
-        }
     }
 
     pub fn handle_loop_close(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
 
         if *memory_value > 0 {
-            self.jump_to_closest_loop_start();
+            self.jump_to_closest_bracket();
         }
 
         self.program_counter += 1;
@@ -225,7 +245,7 @@ impl Interpreter {
             Token::Input => self.handle_input(),
             Token::LoopStart => self.handle_loop_start(),
             Token::LoopClose => self.handle_loop_close(),
-            Token::Comment(_) => {}
+            Token::Comment(_) => self.program_counter += 1,
         }
     }
 
@@ -240,6 +260,7 @@ impl Interpreter {
     pub fn run(&mut self) {
         while self.instructions.len() > self.program_counter {
             self.step();
+            println!("{}", self);
         }
     }
 }
@@ -257,8 +278,21 @@ impl fmt::Display for Interpreter {
     }
 }
 fn main() {
-    let mut code = String::from(
-        "++++++++++[>+>+++>+++++++>++++++++++<<<<-]>>>>+++++++++++.-------.<<++.>>+++++++++++.-----------.+.+++++++++++.<<.>>-------.------------.+++++++++++++.<<.>>++++++.------------.+.++++++++++.<<.>>----------.++++++++++.<<.>>------------.++++++++..-----------.",
+    let code = String::from(
+        ",                           ;read character and store it in p1
+------------------------------------------------   ;return ascii to Dec
+<                           ;move pointer to p2 (second byte)
+,                           ;read character and store it in p2
+------------------------------------------------ ;return ascii to Dec
+[                           ; enter loop
+-                           ; decrement p2
+>                           ; move to p1
++                           ; increment p1
+<                           ; move to p2
+]                           ; we exit the loop when the last cell is empty
+>                           ;go back to p1
+++++++++++++++++++++++++++++++++++++++++++++++++     ;return Dec to ascii
+.                           ;print p1",
     );
     let mut bf: Interpreter = Interpreter::new(&code);
 
@@ -289,5 +323,40 @@ mod tokenizer_tests {
         ];
 
         assert_eq!(expected, Tokenizer::tokenize(code));
+    }
+}
+
+#[cfg(test)]
+mod jump_table_tests {
+    use std::collections::HashMap;
+
+    use crate::{JumpTable, Tokenizer};
+
+    #[test]
+    fn well_formed_jump_table() {
+        let code = "[[[+++]]]";
+        let mut expected: HashMap<usize, usize> = HashMap::new();
+        expected.insert(0, 8);
+        expected.insert(1, 7);
+        expected.insert(2, 6);
+        expected.insert(8, 0);
+        expected.insert(7, 1);
+        expected.insert(6, 2);
+
+        assert_eq!(expected, JumpTable::from(Tokenizer::tokenize(code)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn malformed_jump_table_panics1() {
+        let code = "[";
+        JumpTable::from(Tokenizer::tokenize(code));
+    }
+
+    #[test]
+    #[should_panic]
+    fn malformed_jump_table_panics2() {
+        let code = "]";
+        JumpTable::from(Tokenizer::tokenize(code));
     }
 }
