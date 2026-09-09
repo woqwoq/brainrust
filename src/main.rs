@@ -54,8 +54,78 @@ impl Tokenizer {
     }
 }
 
+struct Interpreter {
+    pc: u8,
+    instructions: Vec<Token>,
+    tape: [u8; 256],
+    memory_pointer: u8,
+}
+
+impl Interpreter {
+    pub fn new(instructions: &str) -> Self {
+        Interpreter {
+            pc: 0u8,
+            instructions: Tokenizer::tokenize(instructions),
+            memory_pointer: 0u8,
+            tape: [0u8; 256],
+        }
+    }
+
+    pub fn handle_move_left(&mut self) {
+        let (res, ovf) = self.memory_pointer.overflowing_sub(1);
+        if ovf {
+            panic!("Memory tape pointer left allowed bounds on pc={}", self.pc)
+        }
+
+        self.memory_pointer = res
+    }
+
+    pub fn handle_move_right(&mut self) {
+        self.memory_pointer += 1;
+    }
+
+    pub fn fetch_instruction(&self) -> Option<Token> {
+        self.instructions.get(self.pc as usize).cloned()
+    }
+
+    pub fn execute_instruction(&mut self, instruction: Token) {
+        match instruction {
+            Token::MoveLeft => self.handle_move_left(),
+            Token::MoveRight => self.handle_move_right(),
+            _ => todo!("Only 2 instructions currently supported"),
+        }
+    }
+
+    pub fn step(&mut self) {
+        if let Some(instruction) = self.fetch_instruction() {
+            self.execute_instruction(instruction);
+            self.pc += 1;
+        } else {
+            panic!("Failed to fetch instruction at pc={}", self.pc) // not expected
+        }
+    }
+
+    pub fn run(&mut self) {
+        while self.instructions.len() > (self.pc as usize) {
+            self.step();
+        }
+    }
+}
+
+impl fmt::Display for Interpreter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "PC: {}\nMemory Pointer: {}",
+            self.pc, self.memory_pointer
+        )
+    }
+}
 fn main() {
-    todo!();
+    let code = ">>><<<<";
+    let mut bf: Interpreter = Interpreter::new(code);
+
+    bf.run();
 }
 
 #[cfg(test)]
