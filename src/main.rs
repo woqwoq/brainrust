@@ -1,4 +1,8 @@
-use std::fmt;
+use std::{
+    collections::HashSet,
+    fmt,
+    io::{self, Write},
+};
 
 #[derive(Debug, PartialEq, Clone)]
 enum Token {
@@ -54,13 +58,15 @@ impl Tokenizer {
     }
 }
 
-const DEFAULT_TAPE_SIZE: usize = 30000;
+const DEFAULT_TAPE_SIZE: usize = 15;
 
 struct Interpreter {
     program_counter: usize,
     instructions: Vec<Token>,
     memory_pointer: usize,
     memory: [u8; DEFAULT_TAPE_SIZE],
+
+    loop_starts: HashSet<usize>,
 }
 
 impl Interpreter {
@@ -70,6 +76,7 @@ impl Interpreter {
             instructions: Tokenizer::tokenize(instructions),
             memory_pointer: 0,
             memory: [0u8; DEFAULT_TAPE_SIZE],
+            loop_starts: HashSet::new(),
         }
     }
 
@@ -82,7 +89,9 @@ impl Interpreter {
             )
         }
 
-        self.memory_pointer = res
+        self.memory_pointer = res;
+
+        self.program_counter += 1;
     }
 
     pub fn handle_move_right(&mut self) {
@@ -94,23 +103,76 @@ impl Interpreter {
             )
         }
 
-        self.memory_pointer = res
+        self.memory_pointer = res;
+
+        self.program_counter += 1;
     }
 
     pub fn handle_increment(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
-        *memory_value += 1
+        *memory_value += 1;
+
+        self.program_counter += 1;
     }
 
     pub fn handle_decrement(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
-        *memory_value -= 1
+        *memory_value -= 1;
+
+        self.program_counter += 1;
     }
 
-    pub fn handle_output(&self) {
+    pub fn handle_output(&mut self) {
         let memory_val_ascii =
             char::from_u32(*self.fetch_memory(self.memory_pointer) as u32).unwrap();
-        print!("{}", memory_val_ascii)
+        print!("{}", memory_val_ascii);
+        io::stdout().flush().unwrap();
+
+        self.program_counter += 1;
+    }
+
+    pub fn handle_input(&mut self) {
+        let mut string_buffer = String::new();
+
+        io::stdin().read_line(&mut string_buffer).unwrap();
+
+        if let Ok(n) = string_buffer.trim().parse::<u8>() {
+            *self.fetch_memory_mut(self.memory_pointer) = n;
+        }
+
+        self.program_counter += 1;
+    }
+
+    fn jump_to_closest_loop_close(&mut self) {
+        while self.fetch_instruction().unwrap() != Token::LoopClose {
+            self.program_counter += 1;
+        }
+    }
+
+    pub fn handle_loop_start(&mut self) {
+        let memory_value = self.fetch_memory_mut(self.memory_pointer);
+
+        if *memory_value == 0 {
+            self.jump_to_closest_loop_close();
+        }
+
+        self.program_counter += 1;
+    }
+
+    fn jump_to_closest_loop_start(&mut self) {
+        while self.fetch_instruction().unwrap() != Token::LoopStart {
+            self.program_counter -= 1;
+        }
+    }
+
+    pub fn handle_loop_close(&mut self) {
+        let memory_value = self.fetch_memory_mut(self.memory_pointer);
+
+        if *memory_value > 0 {
+            self.jump_to_closest_loop_start();
+        }
+
+        self.program_counter += 1;
     }
 
     pub fn fetch_instruction(&self) -> Option<Token> {
@@ -160,14 +222,16 @@ impl Interpreter {
             Token::Increment => self.handle_increment(),
             Token::Decrement => self.handle_decrement(),
             Token::Output => self.handle_output(),
-            _ => todo!("Only 2 instructions currently supported"),
+            Token::Input => self.handle_input(),
+            Token::LoopStart => self.handle_loop_start(),
+            Token::LoopClose => self.handle_loop_close(),
+            Token::Comment(_) => {}
         }
     }
 
     pub fn step(&mut self) {
         if let Some(instruction) = self.fetch_instruction() {
             self.execute_instruction(instruction);
-            self.program_counter += 1;
         } else {
             panic!("Failed to fetch instruction at pc={}", self.program_counter) // not expected
         }
@@ -184,22 +248,18 @@ impl fmt::Display for Interpreter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "PC: {}\nMemory Pointer: {}",
-            self.program_counter, self.memory_pointer
+            "---\nPC: {}\nInstruction: {:?}\nMemory Pointer: {}\nMemory Dump: {:?}",
+            self.program_counter,
+            self.instructions[self.program_counter],
+            self.memory_pointer,
+            self.memory
         )
     }
 }
 fn main() {
-    let mut code = String::from("");
-    for _ in 0..65 {
-        code.push('+');
-    }
-    code.push('.');
-    code.push('>');
-    for _ in 0..66 {
-        code.push('+');
-    }
-    code.push_str(".<+.>+.");
+    let mut code = String::from(
+        "++++++++++[>+>+++>+++++++>++++++++++<<<<-]>>>>+++++++++++.-------.<<++.>>+++++++++++.-----------.+.+++++++++++.<<.>>-------.------------.+++++++++++++.<<.>>++++++.------------.+.++++++++++.<<.>>----------.++++++++++.<<.>>------------.++++++++..-----------.",
+    );
     let mut bf: Interpreter = Interpreter::new(&code);
 
     bf.run();
