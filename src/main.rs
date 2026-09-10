@@ -22,7 +22,7 @@ enum Token {
 
 struct JumpTable {}
 impl JumpTable {
-    pub fn from(tokens: Vec<Token>) -> HashMap<usize, usize> {
+    pub fn from(tokens: &[Token]) -> HashMap<usize, usize> {
         let mut stack: Vec<usize> = Vec::new();
         let mut jump_table = HashMap::new();
 
@@ -59,7 +59,7 @@ impl Tokenizer {
 
         for char in input.chars() {
             dump_comment = true;
-            let current_tokent = match char {
+            let current_token = match char {
                 '<' => Some(Token::MoveLeft),
                 '>' => Some(Token::MoveRight),
                 '+' => Some(Token::Increment),
@@ -75,13 +75,17 @@ impl Tokenizer {
                 }
             };
 
-            if let Some(t) = current_tokent {
+            if let Some(t) = current_token {
                 if dump_comment && !comment_buffer.is_empty() {
                     tokens.push(Token::Comment(comment_buffer.clone()));
                     comment_buffer.clear();
                 }
                 tokens.push(t);
             }
+        }
+        if !comment_buffer.is_empty() {
+            tokens.push(Token::Comment(comment_buffer.clone()));
+            comment_buffer.clear();
         }
 
         tokens
@@ -104,50 +108,33 @@ impl Interpreter {
             instructions: tokens.clone(),
             memory_pointer: 0,
             memory: [0u8; DEFAULT_TAPE_SIZE],
-            jump_table: JumpTable::from(tokens),
+            jump_table: JumpTable::from(&tokens),
         }
     }
 
     pub fn handle_move_left(&mut self) {
-        let (res, ovf) = self.memory_pointer.overflowing_sub(1);
-        if ovf {
-            panic!(
-                "Memory tape pointer left allowed bounds on pc={}",
-                self.program_counter
-            )
-        }
-
-        self.memory_pointer = res;
-
-        self.program_counter += 1;
+        self.memory_pointer -= 1;
     }
 
     pub fn handle_move_right(&mut self) {
-        let (res, ovf) = self.memory_pointer.overflowing_add(1);
-        if ovf {
+        if self.memory_pointer + 1 >= DEFAULT_TAPE_SIZE {
             panic!(
                 "Memory tape pointer left allowed bounds on pc={}",
                 self.program_counter
             )
         }
 
-        self.memory_pointer = res;
-
-        self.program_counter += 1;
+        self.memory_pointer += 1;
     }
 
     pub fn handle_increment(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
         *memory_value = memory_value.wrapping_add(1);
-
-        self.program_counter += 1;
     }
 
     pub fn handle_decrement(&mut self) {
         let memory_value = self.fetch_memory_mut(self.memory_pointer);
         *memory_value = memory_value.wrapping_sub(1);
-
-        self.program_counter += 1;
     }
 
     pub fn handle_output(&mut self) {
@@ -155,8 +142,6 @@ impl Interpreter {
             char::from_u32(*self.fetch_memory(self.memory_pointer) as u32).unwrap();
         print!("{}", memory_val_ascii);
         io::stdout().flush().unwrap();
-
-        self.program_counter += 1;
     }
 
     pub fn handle_input(&mut self) {
@@ -164,11 +149,7 @@ impl Interpreter {
 
         io::stdin().read_line(&mut string_buffer).unwrap();
 
-        if let Ok(n) = string_buffer.trim().parse::<u8>() {
-            *self.fetch_memory_mut(self.memory_pointer) = n;
-        }
-
-        self.program_counter += 1;
+        *self.fetch_memory_mut(self.memory_pointer) = string_buffer.bytes().next().unwrap();
     }
 
     fn jump_to_closest_bracket(&mut self) {
@@ -181,8 +162,6 @@ impl Interpreter {
         if *memory_value == 0 {
             self.jump_to_closest_bracket();
         }
-
-        self.program_counter += 1;
     }
 
     pub fn handle_loop_close(&mut self) {
@@ -191,8 +170,6 @@ impl Interpreter {
         if *memory_value > 0 {
             self.jump_to_closest_bracket();
         }
-
-        self.program_counter += 1;
     }
 
     pub fn fetch_instruction(&self) -> Option<Token> {
@@ -200,14 +177,14 @@ impl Interpreter {
     }
 
     pub fn fetch_memory(&self, index: usize) -> &u8 {
-        if self.memory.len() < index {
+        if self.memory.len() <= index {
             panic!(
                 "Trying to access memory at cell={} while DEFAULT_TAPE_SIZE={}",
                 index, DEFAULT_TAPE_SIZE
             )
         }
 
-        if let Some(memory_value) = self.memory.get(self.memory_pointer) {
+        if let Some(memory_value) = self.memory.get(index) {
             memory_value
         } else {
             panic!(
@@ -218,14 +195,14 @@ impl Interpreter {
     }
 
     pub fn fetch_memory_mut(&mut self, index: usize) -> &mut u8 {
-        if self.memory.len() < index {
+        if self.memory.len() <= index {
             panic!(
                 "Trying to access memory at cell={} while DEFAULT_TAPE_SIZE={}",
                 index, DEFAULT_TAPE_SIZE
             )
         }
 
-        if let Some(memory_value) = self.memory.get_mut(self.memory_pointer) {
+        if let Some(memory_value) = self.memory.get_mut(index) {
             memory_value
         } else {
             panic!(
@@ -245,13 +222,14 @@ impl Interpreter {
             Token::Input => self.handle_input(),
             Token::LoopStart => self.handle_loop_start(),
             Token::LoopClose => self.handle_loop_close(),
-            Token::Comment(_) => self.program_counter += 1,
+            Token::Comment(_) => {}
         }
     }
 
     pub fn step(&mut self) {
         if let Some(instruction) = self.fetch_instruction() {
             self.execute_instruction(instruction);
+            self.program_counter += 1
         } else {
             panic!("Failed to fetch instruction at pc={}", self.program_counter) // not expected
         }
@@ -260,7 +238,7 @@ impl Interpreter {
     pub fn run(&mut self) {
         while self.instructions.len() > self.program_counter {
             self.step();
-            println!("{}", self);
+            // println!("{}", self);
         }
     }
 }
@@ -279,20 +257,22 @@ impl fmt::Display for Interpreter {
 }
 fn main() {
     let code = String::from(
-        ",                           ;read character and store it in p1
+        "
+,                           ;read character and store it in p1
 ------------------------------------------------   ;return ascii to Dec
-<                           ;move pointer to p2 (second byte)
+>                           ;move pointer to p2 (second byte)
 ,                           ;read character and store it in p2
 ------------------------------------------------ ;return ascii to Dec
 [                           ; enter loop
 -                           ; decrement p2
->                           ; move to p1
+<                           ; move to p1
 +                           ; increment p1
-<                           ; move to p2
+>                           ; move to p2
 ]                           ; we exit the loop when the last cell is empty
->                           ;go back to p1
+<                           ;go back to p1
 ++++++++++++++++++++++++++++++++++++++++++++++++     ;return Dec to ascii
-.                           ;print p1",
+.                           ;print p1
+",
     );
     let mut bf: Interpreter = Interpreter::new(&code);
 
@@ -324,6 +304,29 @@ mod tokenizer_tests {
 
         assert_eq!(expected, Tokenizer::tokenize(code));
     }
+
+    #[test]
+    fn trailing_comment_tokenized_properly1() {
+        let code = "+>comment+<+comment";
+        let expected = vec![
+            Token::Increment,
+            Token::MoveRight,
+            Token::Comment(String::from("comment")),
+            Token::Increment,
+            Token::MoveLeft,
+            Token::Increment,
+            Token::Comment(String::from("comment")),
+        ];
+
+        assert_eq!(expected, Tokenizer::tokenize(code));
+    }
+    #[test]
+    fn trailing_comment_tokenized_properly2() {
+        let code = "comment";
+        let expected = vec![Token::Comment(String::from("comment"))];
+
+        assert_eq!(expected, Tokenizer::tokenize(code));
+    }
 }
 
 #[cfg(test)]
@@ -343,20 +346,76 @@ mod jump_table_tests {
         expected.insert(7, 1);
         expected.insert(6, 2);
 
-        assert_eq!(expected, JumpTable::from(Tokenizer::tokenize(code)));
+        assert_eq!(expected, JumpTable::from(&Tokenizer::tokenize(code)));
     }
 
     #[test]
     #[should_panic]
     fn malformed_jump_table_panics1() {
         let code = "[";
-        JumpTable::from(Tokenizer::tokenize(code));
+        JumpTable::from(&Tokenizer::tokenize(code));
     }
 
     #[test]
     #[should_panic]
     fn malformed_jump_table_panics2() {
         let code = "]";
-        JumpTable::from(Tokenizer::tokenize(code));
+        JumpTable::from(&Tokenizer::tokenize(code));
+    }
+}
+
+#[cfg(test)]
+mod interpreter_tests {
+    use crate::{DEFAULT_TAPE_SIZE, Interpreter, JumpTable, Tokenizer};
+
+    fn parametrized_constructs_properly(code: &str) {
+        let expected_tokens = Tokenizer::tokenize(code);
+        let interpreter = Interpreter::new(code);
+
+        assert_eq!(0, interpreter.program_counter);
+        assert_eq!(0, interpreter.memory_pointer);
+        assert_eq!(expected_tokens.clone(), interpreter.instructions);
+        assert_eq!(JumpTable::from(&expected_tokens), interpreter.jump_table);
+        assert_eq!([0u8; DEFAULT_TAPE_SIZE], interpreter.memory);
+    }
+
+    #[test]
+    fn constructs_properly() {
+        parametrized_constructs_properly("");
+        parametrized_constructs_properly("+++>+++<---.");
+        parametrized_constructs_properly("------");
+        parametrized_constructs_properly("<<<<");
+    }
+
+    #[test]
+    #[should_panic]
+    fn panics_on_tape_out_of_range1() {
+        let code = "<";
+        Interpreter::new(code).run();
+    }
+
+    #[test]
+    #[should_panic]
+    fn panics_on_tape_out_of_range2() {
+        let code = ">";
+        let mut interpreter = Interpreter::new(code);
+        interpreter.memory_pointer = DEFAULT_TAPE_SIZE;
+        interpreter.run();
+    }
+
+    #[test]
+    #[should_panic]
+    fn panics_on_fetch_memory_out_of_range() {
+        let code = "";
+        let interpreter = Interpreter::new(code);
+        interpreter.fetch_memory(DEFAULT_TAPE_SIZE + 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn panics_on_fetch_memory_out_of_range_mut() {
+        let code = "";
+        let mut interpreter = Interpreter::new(code);
+        interpreter.fetch_memory_mut(DEFAULT_TAPE_SIZE + 1);
     }
 }
