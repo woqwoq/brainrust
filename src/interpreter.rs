@@ -155,7 +155,7 @@ impl<I: Read, O: Write> Interpreter<I, O> {
     }
 
     pub fn run(&mut self, mem_dump: bool) {
-        while self.program.instructions.len() > self.program_counter {
+        while self.program.get_instruction_count() > self.program_counter {
             self.step();
         }
         if mem_dump {
@@ -166,7 +166,7 @@ impl<I: Read, O: Write> Interpreter<I, O> {
 
 impl<I: Read, O: Write> fmt::Display for Interpreter<I, O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let instruction = match self.program.instructions.get(self.program_counter) {
+        let instruction = match self.program.fetch_instruction(self.program_counter) {
             Some(token) => format!("{token:?}"),
             None => String::from("end of program"),
         };
@@ -197,10 +197,13 @@ mod interpreter_tests {
 
         assert_eq!(0, interpreter.program_counter);
         assert_eq!(0, interpreter.memory_pointer);
-        assert_eq!(expected_tokens.clone(), interpreter.program.instructions);
+        assert_eq!(
+            expected_tokens.clone(),
+            interpreter.program.get_all_instructions()
+        );
         assert_eq!(
             JumpTable::from(&expected_tokens),
-            interpreter.program.jump_table
+            interpreter.program.get_jump_table()
         );
         assert_eq!([0u8; DEFAULT_TAPE_SIZE], interpreter.memory);
     }
