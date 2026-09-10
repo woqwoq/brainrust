@@ -1,29 +1,34 @@
-use std::collections::HashMap;
-use std::io::Write;
-use std::{fmt, io};
+use std::{
+    fmt,
+    io::{Read, Write},
+};
 
+use crate::program::Program;
 use crate::token::Token;
-use crate::tokenizer::{JumpTable, Tokenizer};
 
 const DEFAULT_TAPE_SIZE: usize = 500;
 
-pub struct Interpreter {
+/// Stored at the current cell when `,` reads past the end of input.
+const EOF_BYTE: u8 = 0;
+
+pub struct Interpreter<I: Read, O: Write> {
     program_counter: usize,
-    instructions: Vec<Token>,
     memory_pointer: usize,
     memory: [u8; DEFAULT_TAPE_SIZE],
-    jump_table: HashMap<usize, usize>,
+    program: Program,
+    input: I,
+    output: O,
 }
 
-impl Interpreter {
-    pub fn new(instructions: &str) -> Self {
-        let tokens = Tokenizer::tokenize(instructions);
+impl<I: Read, O: Write> Interpreter<I, O> {
+    pub fn new(program_code: &str, input: I, output: O) -> Self {
         Interpreter {
             program_counter: 0,
-            instructions: tokens.clone(),
             memory_pointer: 0,
             memory: [0u8; DEFAULT_TAPE_SIZE],
-            jump_table: JumpTable::from(&tokens),
+            program: Program::from(program_code),
+            input,
+            output,
         }
     }
 
@@ -62,20 +67,26 @@ impl Interpreter {
     pub fn handle_output(&mut self) {
         let memory_val_ascii =
             char::from_u32(*self.fetch_memory(self.memory_pointer) as u32).unwrap();
-        print!("{}", memory_val_ascii);
-        io::stdout().flush().unwrap();
+        write!(self.output, "{memory_val_ascii}").unwrap();
+        self.output.flush().unwrap();
     }
 
     pub fn handle_input(&mut self) {
-        let mut string_buffer = String::new();
+        let byte = (&mut self.input)
+            .bytes()
+            .next()
+            .transpose()
+            .unwrap()
+            .unwrap_or(EOF_BYTE);
 
-        io::stdin().read_line(&mut string_buffer).unwrap();
-
-        *self.fetch_memory_mut(self.memory_pointer) = string_buffer.bytes().next().unwrap();
+        *self.fetch_memory_mut(self.memory_pointer) = byte;
     }
 
     fn jump_to_closest_bracket(&mut self) {
-        self.program_counter = *self.jump_table.get(&self.program_counter).unwrap();
+        self.program_counter = *self
+            .program
+            .get_matching_bracket(self.program_counter)
+            .unwrap();
     }
 
     pub fn handle_loop_start(&mut self) {
@@ -95,7 +106,7 @@ impl Interpreter {
     }
 
     pub fn fetch_instruction(&self) -> Option<Token> {
-        self.instructions.get(self.program_counter).cloned()
+        self.program.fetch_instruction(self.program_counter)
     }
 
     pub fn fetch_memory(&self, index: usize) -> &u8 {
@@ -106,14 +117,7 @@ impl Interpreter {
             )
         }
 
-        if let Some(memory_value) = self.memory.get(index) {
-            memory_value
-        } else {
-            panic!(
-                "Cannot acces value at tape position={} during executing instruction at pc={}",
-                self.memory_pointer, self.program_counter
-            )
-        }
+        &self.memory[index]
     }
 
     pub fn fetch_memory_mut(&mut self, index: usize) -> &mut u8 {
@@ -124,14 +128,7 @@ impl Interpreter {
             )
         }
 
-        if let Some(memory_value) = self.memory.get_mut(index) {
-            memory_value
-        } else {
-            panic!(
-                "Cannot acces value at tape position={} during executing instruction at pc={}",
-                self.memory_pointer, self.program_counter
-            )
-        }
+        &mut self.memory[index]
     }
 
     pub fn execute_instruction(&mut self, instruction: Token) {
@@ -158,7 +155,7 @@ impl Interpreter {
     }
 
     pub fn run(&mut self, mem_dump: bool) {
-        while self.instructions.len() > self.program_counter {
+        while self.program.instructions.len() > self.program_counter {
             self.step();
         }
         if mem_dump {
@@ -167,33 +164,44 @@ impl Interpreter {
     }
 }
 
-impl fmt::Display for Interpreter {
+impl<I: Read, O: Write> fmt::Display for Interpreter<I, O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let instruction = match self.program.instructions.get(self.program_counter) {
+            Some(token) => format!("{token:?}"),
+            None => String::from("end of program"),
+        };
+
         write!(
             f,
-            "---\nPC: {}\nInstruction: {:?}\nMemory Pointer: {}\nMemory Dump: {:?}",
-            self.program_counter,
-            self.instructions[self.program_counter],
-            self.memory_pointer,
-            self.memory
+            "---\nPC: {}\nInstruction: {}\nMemory Pointer: {}\nMemory Dump: {:?}",
+            self.program_counter, instruction, self.memory_pointer, self.memory
         )
     }
 }
 
 #[cfg(test)]
 mod interpreter_tests {
-    use std::io::{self, Read};
+    use std::io::{self, Cursor};
 
-    use crate::interpreter::{DEFAULT_TAPE_SIZE, Interpreter, JumpTable, Tokenizer};
+    use crate::tokenizer::{JumpTable, Tokenizer};
+
+    use super::*;
+
+    fn test_interpreter(code: &str) -> Interpreter<io::Empty, Vec<u8>> {
+        Interpreter::new(code, io::empty(), Vec::new())
+    }
 
     fn parametrized_constructs_properly(code: &str) {
         let expected_tokens = Tokenizer::tokenize(code);
-        let interpreter = Interpreter::new(code);
+        let interpreter = test_interpreter(code);
 
         assert_eq!(0, interpreter.program_counter);
         assert_eq!(0, interpreter.memory_pointer);
-        assert_eq!(expected_tokens.clone(), interpreter.instructions);
-        assert_eq!(JumpTable::from(&expected_tokens), interpreter.jump_table);
+        assert_eq!(expected_tokens.clone(), interpreter.program.instructions);
+        assert_eq!(
+            JumpTable::from(&expected_tokens),
+            interpreter.program.jump_table
+        );
         assert_eq!([0u8; DEFAULT_TAPE_SIZE], interpreter.memory);
     }
 
@@ -208,13 +216,13 @@ mod interpreter_tests {
     #[test]
     #[should_panic]
     fn panics_on_tape_out_of_range1() {
-        Interpreter::new("").handle_move_left();
+        test_interpreter("").handle_move_left();
     }
 
     #[test]
     #[should_panic]
     fn panics_on_tape_out_of_range2() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         interpreter.memory_pointer = DEFAULT_TAPE_SIZE;
         interpreter.handle_move_right();
     }
@@ -222,22 +230,18 @@ mod interpreter_tests {
     #[test]
     #[should_panic]
     fn panics_on_fetch_memory_out_of_range() {
-        let code = "";
-        let interpreter = Interpreter::new(code);
-        interpreter.fetch_memory(DEFAULT_TAPE_SIZE);
+        test_interpreter("").fetch_memory(DEFAULT_TAPE_SIZE);
     }
 
     #[test]
     #[should_panic]
     fn panics_on_fetch_memory_out_of_range_mut() {
-        let code = "";
-        let mut interpreter = Interpreter::new(code);
-        interpreter.fetch_memory_mut(DEFAULT_TAPE_SIZE);
+        test_interpreter("").fetch_memory_mut(DEFAULT_TAPE_SIZE);
     }
 
     #[test]
     fn handle_move_right() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         interpreter.handle_move_right();
 
         assert_eq!(1, interpreter.memory_pointer);
@@ -245,7 +249,7 @@ mod interpreter_tests {
 
     #[test]
     fn handle_move_left() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         interpreter.memory_pointer = 1;
         interpreter.handle_move_left();
         assert_eq!(0, interpreter.memory_pointer);
@@ -253,7 +257,7 @@ mod interpreter_tests {
 
     #[test]
     fn handle_increment_no_wrap() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         interpreter.handle_increment();
 
         assert_eq!(1, *interpreter.fetch_memory(interpreter.memory_pointer));
@@ -261,7 +265,7 @@ mod interpreter_tests {
 
     #[test]
     fn handle_increment_wrap() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         *interpreter.fetch_memory_mut(interpreter.memory_pointer) = 255;
         interpreter.handle_increment();
 
@@ -270,7 +274,7 @@ mod interpreter_tests {
 
     #[test]
     fn handle_decrement_no_wrap() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         *interpreter.fetch_memory_mut(interpreter.memory_pointer) = 1;
         interpreter.handle_decrement();
 
@@ -279,9 +283,149 @@ mod interpreter_tests {
 
     #[test]
     fn handle_decrement_wrap() {
-        let mut interpreter = Interpreter::new("");
+        let mut interpreter = test_interpreter("");
         interpreter.handle_decrement();
 
         assert_eq!(255, *interpreter.fetch_memory(interpreter.memory_pointer));
+    }
+
+    #[test]
+    fn handle_output_writes_cell_to_sink() {
+        let mut interpreter = test_interpreter("");
+        *interpreter.fetch_memory_mut(0) = b'A';
+
+        interpreter.handle_output();
+
+        assert_eq!(b"A", interpreter.output.as_slice());
+    }
+
+    #[test]
+    fn handle_input_stores_single_bytes() {
+        let mut interpreter = Interpreter::new("", Cursor::new(b"ab".to_vec()), Vec::new());
+
+        interpreter.handle_input();
+        assert_eq!(b'a', *interpreter.fetch_memory(0));
+
+        interpreter.handle_input();
+        assert_eq!(b'b', *interpreter.fetch_memory(0));
+    }
+
+    #[test]
+    fn handle_input_stores_eof_byte_at_end_of_input() {
+        let mut interpreter = test_interpreter("");
+
+        interpreter.handle_input();
+
+        assert_eq!(0, *interpreter.fetch_memory(0));
+    }
+
+    #[test]
+    fn jump_to_closest_bracket1() {
+        let mut interpreter = Interpreter::new("+[>++<-]", io::empty(), Vec::new());
+
+        interpreter.step();
+        assert_eq!(1, interpreter.program_counter);
+
+        interpreter.jump_to_closest_bracket();
+        assert_eq!(7, interpreter.program_counter);
+    }
+
+    #[test]
+    fn handle_loop_start_doesnt_jump_when_non_zero() {
+        let mut interpreter = Interpreter::new("+[>+<-]", io::empty(), Vec::new());
+
+        interpreter.step();
+
+        interpreter.handle_loop_start();
+        assert_eq!(1, interpreter.program_counter);
+    }
+
+    #[test]
+    fn handle_loop_start_jump_when_zero() {
+        let mut interpreter = Interpreter::new("[>+<-]", io::empty(), Vec::new());
+
+        interpreter.handle_loop_start();
+        assert_eq!(5, interpreter.program_counter);
+    }
+
+    #[test]
+    fn handle_loop_close_doesnt_jump_when_lt_zero() {
+        let mut interpreter = Interpreter::new("+[-]", io::empty(), Vec::new());
+        interpreter.step();
+        interpreter.step();
+        interpreter.step();
+
+        interpreter.handle_loop_close();
+        assert_eq!(3, interpreter.program_counter);
+    }
+
+    #[test]
+    fn handle_loop_close_jump_when_gt_zero() {
+        let mut interpreter = Interpreter::new("+[]", io::empty(), Vec::new());
+        interpreter.step();
+        interpreter.step();
+
+        interpreter.handle_loop_close();
+        assert_eq!(1, interpreter.program_counter);
+    }
+
+    #[test]
+    #[should_panic]
+    fn panics_when_stepping_past_program_end() {
+        let mut interpreter = test_interpreter("+");
+        interpreter.program_counter = 10;
+
+        interpreter.step();
+    }
+
+    #[test]
+    fn run_executes_loop_transfer_and_output() {
+        let mut interpreter = test_interpreter("+++[>+<-]>.");
+
+        interpreter.run(false);
+
+        assert_eq!(0, *interpreter.fetch_memory(0));
+        assert_eq!(3, *interpreter.fetch_memory(1));
+        assert_eq!(b"\x03", interpreter.output.as_slice());
+    }
+
+    #[test]
+    fn run_echoes_input_until_eof() {
+        let mut interpreter = Interpreter::new(",[.,]", Cursor::new(b"hi".to_vec()), Vec::new());
+
+        interpreter.run(false);
+
+        assert_eq!(b"hi", interpreter.output.as_slice());
+    }
+
+    #[test]
+    fn run_skips_comments() {
+        let mut interpreter = test_interpreter("++comment.");
+
+        interpreter.run(false);
+
+        assert_eq!(b"\x02", interpreter.output.as_slice());
+    }
+
+    #[test]
+    fn run_prints_memory_dump_when_requested() {
+        let mut interpreter = test_interpreter("++");
+
+        interpreter.run(true);
+
+        assert_eq!(2, *interpreter.fetch_memory(0));
+    }
+
+    #[test]
+    fn display_shows_state_and_survives_end_of_program() {
+        let interpreter = test_interpreter("+");
+        let text = format!("{interpreter}");
+        assert!(text.contains("PC: 0"));
+        assert!(text.contains("Instruction: Increment"));
+
+        let mut interpreter = test_interpreter("+");
+        interpreter.run(false);
+        let text = format!("{interpreter}");
+        assert!(text.contains("end of program"));
     }
 }
