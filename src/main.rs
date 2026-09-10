@@ -113,6 +113,13 @@ impl Interpreter {
     }
 
     pub fn handle_move_left(&mut self) {
+        if self.memory_pointer == 0 {
+            panic!(
+                "Memory tape pointer left allowed bounds on pc={}",
+                self.program_counter
+            )
+        }
+
         self.memory_pointer -= 1;
     }
 
@@ -366,6 +373,8 @@ mod jump_table_tests {
 
 #[cfg(test)]
 mod interpreter_tests {
+    use std::io::{self, Write};
+
     use crate::{DEFAULT_TAPE_SIZE, Interpreter, JumpTable, Tokenizer};
 
     fn parametrized_constructs_properly(code: &str) {
@@ -390,17 +399,15 @@ mod interpreter_tests {
     #[test]
     #[should_panic]
     fn panics_on_tape_out_of_range1() {
-        let code = "<";
-        Interpreter::new(code).run();
+        Interpreter::new("").handle_move_left();
     }
 
     #[test]
     #[should_panic]
     fn panics_on_tape_out_of_range2() {
-        let code = ">";
-        let mut interpreter = Interpreter::new(code);
+        let mut interpreter = Interpreter::new("");
         interpreter.memory_pointer = DEFAULT_TAPE_SIZE;
-        interpreter.run();
+        interpreter.handle_move_right();
     }
 
     #[test]
@@ -408,7 +415,7 @@ mod interpreter_tests {
     fn panics_on_fetch_memory_out_of_range() {
         let code = "";
         let interpreter = Interpreter::new(code);
-        interpreter.fetch_memory(DEFAULT_TAPE_SIZE + 1);
+        interpreter.fetch_memory(DEFAULT_TAPE_SIZE);
     }
 
     #[test]
@@ -416,6 +423,72 @@ mod interpreter_tests {
     fn panics_on_fetch_memory_out_of_range_mut() {
         let code = "";
         let mut interpreter = Interpreter::new(code);
-        interpreter.fetch_memory_mut(DEFAULT_TAPE_SIZE + 1);
+        interpreter.fetch_memory_mut(DEFAULT_TAPE_SIZE);
+    }
+
+    #[test]
+    fn handle_move_right() {
+        let mut interpreter = Interpreter::new("");
+        interpreter.handle_move_right();
+
+        assert_eq!(1, interpreter.memory_pointer);
+    }
+
+    #[test]
+    fn handle_move_left() {
+        let mut interpreter = Interpreter::new("");
+        interpreter.memory_pointer = 1;
+        interpreter.handle_move_left();
+        assert_eq!(0, interpreter.memory_pointer);
+    }
+
+    #[test]
+    fn handle_increment_no_wrap() {
+        let mut interpreter = Interpreter::new("");
+        interpreter.handle_increment();
+
+        assert_eq!(1, *interpreter.fetch_memory(interpreter.memory_pointer));
+    }
+
+    #[test]
+    fn handle_increment_wrap() {
+        let mut interpreter = Interpreter::new("");
+        *interpreter.fetch_memory_mut(interpreter.memory_pointer) = 255;
+        interpreter.handle_increment();
+
+        assert_eq!(0, *interpreter.fetch_memory(interpreter.memory_pointer));
+    }
+
+    #[test]
+    fn handle_decrement_no_wrap() {
+        let mut interpreter = Interpreter::new("");
+        *interpreter.fetch_memory_mut(interpreter.memory_pointer) = 1;
+        interpreter.handle_decrement();
+
+        assert_eq!(0, *interpreter.fetch_memory(interpreter.memory_pointer));
+    }
+
+    #[test]
+    fn handle_decrement_wrap() {
+        let mut interpreter = Interpreter::new("");
+        interpreter.handle_decrement();
+
+        assert_eq!(255, *interpreter.fetch_memory(interpreter.memory_pointer));
+    }
+
+    #[test]
+    fn handle_input() {
+        let mut interpreter = Interpreter::new("");
+
+        let mut stdout_handle = io::stdout();
+        write!(stdout_handle, "a").unwrap();
+        stdout_handle.flush().unwrap();
+
+        interpreter.handle_input();
+
+        assert_eq!(
+            'a' as u8,
+            *interpreter.fetch_memory(interpreter.memory_pointer)
+        );
     }
 }
