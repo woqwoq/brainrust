@@ -537,3 +537,74 @@ mod interpreter_tests {
         assert!(text.contains("end of program"));
     }
 }
+
+#[cfg(test)]
+mod runtime_error_test {
+    use std::{error::Error, io};
+
+    use crate::interpreter::RuntimeError;
+
+    #[test]
+    fn source_returns_some() {
+        let io_error = io::Error::new(io::ErrorKind::ResourceBusy, "");
+        let runtime_error = RuntimeError::Io(io::Error::new(io::ErrorKind::ResourceBusy, ""));
+
+        assert_eq!(
+            io_error.to_string(),
+            runtime_error.source().unwrap().to_string()
+        );
+    }
+
+    #[test]
+    fn source_returns_none() {
+        let runtime_error = RuntimeError::InstructionFetch { pc: 0 };
+
+        assert!(runtime_error.source().is_none());
+    }
+
+    #[test]
+    fn fmt_instruction_fetch_err() {
+        let runtime_error = RuntimeError::InstructionFetch { pc: 0 };
+
+        assert_eq!(
+            "failed to fetch instruction at pc=0",
+            format!("{}", runtime_error)
+        );
+    }
+
+    #[test]
+    fn fmt_memory_pointer_out_of_bounds_err() {
+        let runtime_error = RuntimeError::MemoryPointerOutOfBounds { pc: 0, pointer: 0 };
+
+        assert_eq!(
+            "memory pointer 0 out of bounds at pc=0",
+            format!("{}", runtime_error)
+        );
+    }
+
+    #[test]
+    fn fmt_memory_access_out_of_bounds_err() {
+        let runtime_error = RuntimeError::MemoryAccessOutOfBounds {
+            cell: 0,
+            tape_size: 30000,
+        };
+
+        assert_eq!(
+            "memory access at cell=0 while tape size is 30000",
+            format!("{}", runtime_error)
+        );
+    }
+
+    #[test]
+    fn fmt_io_err() {
+        let runtime_error = RuntimeError::Io(io::Error::new(
+            io::ErrorKind::ResourceBusy,
+            "super serious error",
+        ));
+
+        assert_eq!(
+            "io error: super serious error",
+            format!("{}", runtime_error)
+        );
+    }
+}
