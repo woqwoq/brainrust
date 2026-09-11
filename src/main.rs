@@ -1,15 +1,11 @@
 mod cli;
+mod error;
 mod interpreter;
 mod program;
 mod token;
 mod tokenizer;
 
-use std::io;
-
-use clap::Parser;
-use interpreter::Interpreter;
-
-use crate::cli::Cli;
+use crate::cli::CliRunner;
 
 // TODO:
 // 2. Add CLI
@@ -17,10 +13,7 @@ use crate::cli::Cli;
 // 4. Comments?
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli_runner = CliRunner::new();
 
-    let code = "";
-    let mut bf = Interpreter::new(code, io::stdin(), io::stdout());
-
-    let _ = bf.run(false);
+    cli_runner.run();
 }
