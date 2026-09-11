@@ -4,8 +4,8 @@ use crate::token::Token;
 use crate::tokenizer::{JumpTable, Tokenizer};
 
 pub struct Program {
-    instructions: Vec<Token>,
-    jump_table: HashMap<usize, usize>,
+    pub instructions: Vec<Token>,
+    pub jump_table: HashMap<usize, usize>,
 }
 
 impl Program {
@@ -28,14 +28,6 @@ impl Program {
 
     pub fn get_instruction_count(&self) -> usize {
         self.instructions.len()
-    }
-
-    pub fn get_all_instructions(&self) -> Vec<Token> {
-        self.instructions.clone()
-    }
-
-    pub fn get_jump_table(&self) -> HashMap<usize, usize> {
-        self.jump_table.clone()
     }
 }
 
@@ -72,8 +64,8 @@ mod program_tests {
         let program = Program::from(code);
 
         assert_eq!(expected_instructions.len(), program.get_instruction_count());
-        assert_eq!(expected_instructions, program.get_all_instructions());
-        assert_eq!(expected_jump_table, program.get_jump_table());
+        assert_eq!(expected_instructions, program.instructions);
+        assert_eq!(expected_jump_table, program.jump_table);
     }
 
     #[test]
