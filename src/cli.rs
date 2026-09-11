@@ -8,6 +8,8 @@ use clap::Parser;
 
 use crate::interpreter::Interpreter;
 
+const DEFAULT_TAPE_SIZE: usize = 500;
+
 #[derive(Parser)]
 #[command(about = "A CLI Brainfuck interpreter.")]
 pub struct Cli {
@@ -34,7 +36,7 @@ pub struct Cli {
         long,
         value_name = "MEMSIZE",
         requires = "input",
-        default_value_t = 30000
+        default_value_t = DEFAULT_TAPE_SIZE
     )]
     pub memsize: usize,
 
@@ -46,6 +48,24 @@ pub struct Cli {
         default_value_t = false
     )]
     pub memdump: bool,
+}
+
+pub struct InterpreterConfig {
+    pub memsize: usize,
+}
+
+impl Default for InterpreterConfig {
+    fn default() -> Self {
+        InterpreterConfig { memsize: 30000 }
+    }
+}
+
+impl InterpreterConfig {
+    pub fn from(cli: &Cli) -> Self {
+        InterpreterConfig {
+            memsize: cli.memsize,
+        }
+    }
 }
 
 pub struct CliRunner {
@@ -61,23 +81,22 @@ impl CliRunner {
         let mut code = String::new();
         if let Some(file_path) = &self.cli.file {
             if !file_path.exists() {
-                panic!("File '{}' does not exist.", file_path.to_str().unwrap())
+                panic!(
+                    "Error: File '{}' does not exist.",
+                    file_path.to_str().unwrap()
+                )
             }
 
             match File::open(file_path) {
                 Ok(mut file) => {
                     let s = file.read_to_string(&mut code).unwrap();
-                    println!("file opened {s}");
 
                     if code.is_empty() {
-                        panic!(
-                            "Error: The input file '{}' is empty.",
-                            file_path.to_str().unwrap()
-                        )
+                        panic!("Error: File '{}' is empty.", file_path.to_str().unwrap())
                     }
                 }
                 Err(e) => panic!(
-                    "Failed to open file '{}' with error: {}",
+                    "Error: Failed to open File '{}' with error: {}",
                     file_path.to_str().unwrap(),
                     e
                 ),
@@ -88,15 +107,16 @@ impl CliRunner {
             code = inline_code.clone();
         }
 
-        self.run_interpreter(&code);
+        let interpreter_config = InterpreterConfig::from(&self.cli);
+        self.run_interpreter(&code, interpreter_config);
     }
 
-    fn run_interpreter(&mut self, code: &str) {
-        let mut interpreter = Interpreter::new(code, io::stdin(), io::stdout());
+    fn run_interpreter(&mut self, code: &str, interpreter_config: InterpreterConfig) {
+        let mut interpreter = Interpreter::new(code, interpreter_config, io::stdin(), io::stdout());
 
         match interpreter.run(false) {
-            Ok(_) => println!("Finished execution of the program."),
-            Err(e) => println!("Fatal error encountered: {}", e),
+            Ok(_) => println!("\nFinished execution of the program."),
+            Err(e) => println!("\nFatal error encountered: {}", e),
         };
     }
 }

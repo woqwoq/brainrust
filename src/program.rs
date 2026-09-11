@@ -18,16 +18,16 @@ impl Program {
         }
     }
 
+    pub fn has_instruction(&self, index: usize) -> bool {
+        self.instructions.len() > index && self.instructions.get(index).is_some()
+    }
+
     pub fn fetch_instruction(&self, index: usize) -> Option<Token> {
         self.instructions.get(index).cloned()
     }
 
     pub fn get_matching_bracket(&self, index: usize) -> Option<&usize> {
         self.jump_table.get(&index)
-    }
-
-    pub fn get_instruction_count(&self) -> usize {
-        self.instructions.len()
     }
 }
 
@@ -63,7 +63,7 @@ mod program_tests {
 
         let program = Program::from(code);
 
-        assert_eq!(expected_instructions.len(), program.get_instruction_count());
+        assert_eq!(expected_instructions.len(), program.instructions.len());
         assert_eq!(expected_instructions, program.instructions);
         assert_eq!(expected_jump_table, program.jump_table);
     }

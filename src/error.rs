@@ -19,7 +19,10 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MemoryPointerOutOfBounds { pc, pointer } => {
-                write!(f, "memory pointer {pointer} out of bounds at pc={pc}")
+                write!(
+                    f,
+                    "memory pointer {pointer} will go out out of bounds at pc={pc}"
+                )
             }
             Self::MemoryAccessOutOfBounds { cell, tape_size } => {
                 write!(
@@ -83,7 +86,7 @@ mod runtime_error_test {
         let runtime_error = RuntimeError::MemoryPointerOutOfBounds { pc: 0, pointer: 0 };
 
         assert_eq!(
-            "memory pointer 0 out of bounds at pc=0",
+            "memory pointer 0 will go out out of bounds at pc=0",
             format!("{}", runtime_error)
         );
     }
