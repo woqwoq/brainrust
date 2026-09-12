@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::token::Token;
 use crate::tokenizer::{JumpTable, Tokenizer};
 
+#[derive(Clone)]
 pub struct Program {
     pub instructions: Vec<Token>,
     pub jump_table: HashMap<usize, usize>,
@@ -28,6 +30,17 @@ impl Program {
 
     pub fn get_matching_bracket(&self, index: usize) -> Option<&usize> {
         self.jump_table.get(&index)
+    }
+}
+
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut code = String::new();
+        for instruction in &self.instructions {
+            code.push(instruction.get_symbol());
+        }
+
+        write!(f, "{}", code)
     }
 }
 

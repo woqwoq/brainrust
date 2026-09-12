@@ -151,6 +151,21 @@ impl<I: Read, O: Write> Interpreter<I, O> {
         self.program.fetch_instruction(self.program_counter)
     }
 
+    pub fn mem_dump(&self) -> Vec<u8> {
+        self.memory.clone()
+    }
+
+    pub fn get_current_pc(&self) -> usize {
+        self.program_counter
+    }
+
+    pub fn get_current_memory_pointer(&self) -> usize {
+        self.memory_pointer
+    }
+
+    pub fn get_program(&self) -> &Program {
+        &self.program
+    }
     pub fn execute_instruction(&mut self, instruction: Token) -> Result<(), RuntimeError> {
         match instruction {
             Token::MoveLeft => self.handle_move_left(),
