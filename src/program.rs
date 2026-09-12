@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::error::SyntaxError;
 use crate::token::Token;
 use crate::tokenizer::{JumpTable, Tokenizer};
 
@@ -11,13 +12,13 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn from(program_code: &str) -> Self {
+    pub fn from(program_code: &str) -> Result<Self, SyntaxError> {
         let instructions = Tokenizer::tokenize(program_code);
-        let jump_table = JumpTable::from(&instructions);
-        Program {
+        let jump_table = JumpTable::from(&instructions)?;
+        Ok(Program {
             instructions,
             jump_table,
-        }
+        })
     }
 
     pub fn has_instruction(&self, index: usize) -> bool {
@@ -48,6 +49,7 @@ impl fmt::Display for Program {
 mod program_tests {
     use std::collections::HashMap;
 
+    use crate::error::SyntaxError;
     use crate::{program::Program, token::Token};
 
     #[test]
@@ -74,7 +76,7 @@ mod program_tests {
         expected_jump_table.insert(10, 12);
         expected_jump_table.insert(12, 10);
 
-        let program = Program::from(code);
+        let program = Program::from(code).unwrap();
 
         assert_eq!(expected_instructions.len(), program.instructions.len());
         assert_eq!(expected_instructions, program.instructions);
@@ -100,7 +102,7 @@ mod program_tests {
             Token::LoopClose,
         ];
 
-        let program = Program::from(code);
+        let program = Program::from(code).unwrap();
 
         for (i, instruction) in expected_instructions.into_iter().enumerate() {
             assert_eq!(instruction, program.fetch_instruction(i).unwrap());
@@ -117,10 +119,18 @@ mod program_tests {
         expected_jump_table.insert(10, 12);
         expected_jump_table.insert(12, 10);
 
-        let program = Program::from(code);
+        let program = Program::from(code).unwrap();
 
         for (x, y) in expected_jump_table.iter() {
             assert_eq!(*y, *program.get_matching_bracket(*x).unwrap());
         }
+    }
+
+    #[test]
+    fn errors_on_malformed_program() {
+        assert!(matches!(
+            Program::from("["),
+            Err(SyntaxError::UnmatchedLoopLeftBracket { position: 0, .. })
+        ));
     }
 }

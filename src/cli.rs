@@ -7,7 +7,11 @@ use std::{
 
 use clap::Parser;
 
-use crate::{interpreter::Interpreter, program::Program};
+use crate::{
+    error::{BrainfuckError, CliError, RuntimeError, SyntaxError},
+    interpreter::Interpreter,
+    program::Program,
+};
 
 const DEFAULT_TAPE_SIZE: usize = 500;
 
@@ -80,14 +84,14 @@ impl CliRunner {
         CliRunner { cli: Cli::parse() }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), BrainfuckError> {
         let mut code = String::new();
         if let Some(file_path) = &self.cli.file {
             if !file_path.exists() {
-                panic!(
+                return Err(BrainfuckError::CliError(CliError::Io(format!(
                     "Error: File '{}' does not exist.",
                     file_path.to_str().unwrap()
-                )
+                ))));
             }
 
             match File::open(file_path) {
@@ -95,14 +99,19 @@ impl CliRunner {
                     let _ = file.read_to_string(&mut code).unwrap();
 
                     if code.is_empty() {
-                        panic!("Error: File '{}' is empty.", file_path.to_str().unwrap())
+                        return Err(BrainfuckError::CliError(CliError::Io(format!(
+                            "Error: File '{}' is empty.",
+                            file_path.to_str().unwrap()
+                        ))));
                     }
                 }
-                Err(e) => panic!(
-                    "Error: Failed to open File '{}' with error: {}",
-                    file_path.to_str().unwrap(),
-                    e
-                ),
+                Err(e) => {
+                    return Err(BrainfuckError::CliError(CliError::Io(format!(
+                        "Error: Failed to open File '{}' with error: {}",
+                        file_path.to_str().unwrap(),
+                        e
+                    ))));
+                }
             }
         }
 
@@ -111,15 +120,15 @@ impl CliRunner {
         }
 
         if self.cli.interactive_mode {
-            self.run_interpreter_interactive(&code);
+            self.run_interpreter_interactive(&code)
         } else {
-            self.run_interpreter(&code);
+            self.run_interpreter(&code)
         }
     }
 
-    fn run_interpreter_interactive(&mut self, code: &str) {
+    fn run_interpreter_interactive(&mut self, code: &str) -> Result<(), BrainfuckError> {
         let interpreter_config = InterpreterConfig::from(&self.cli);
-        let mut interpreter = Interpreter::new(code, interpreter_config, io::stdin(), io::stdout());
+        let mut interpreter = Self::create_interpreter(code, interpreter_config)?;
         let program = interpreter.get_program().clone();
 
         let mut high_water = 0;
@@ -128,10 +137,10 @@ impl CliRunner {
             high_water = high_water.max(interpreter.get_current_memory_pointer());
 
             println!("----------------------------------------------");
-            println!("Program: \n{}", render_program(&program, pc));
+            println!("Program: \n{}", Self::render_program(&program, pc));
             println!(
                 "Memory: {}",
-                render_memory(&interpreter.mem_dump(), high_water)
+                Self::render_memory(&interpreter.mem_dump(), high_water)
             );
             println!(
                 "s: step / r: run the program until halt / p: print current memory value / q: quit"
@@ -143,65 +152,79 @@ impl CliRunner {
             }
             if let Some(c) = user_input.chars().next() {
                 match c {
-                    's' => match interpreter.step() {
-                        Ok(_) => {}
-                        Err(e) => {
-                            println!("\nFatal error encountered: {}", e);
-                            process::exit(1)
-                        }
-                    },
-                    'r' => match interpreter.run(false) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            println!("\nFatal error encountered: {}", e);
-                            process::exit(1)
-                        }
-                    },
+                    's' => interpreter
+                        .step()
+                        .map_err(|e| BrainfuckError::from_runtime_error(e)),
+                    'r' => interpreter
+                        .step()
+                        .map_err(|e| BrainfuckError::from_runtime_error(e)),
                     'p' => {
                         print!("Value at current cell: ");
                         let _ = interpreter.handle_output();
                         println!();
+                        Ok(())
                     }
                     'q' => process::exit(0),
                     _ => {
-                        println!("Unknown command: {c}.")
+                        println!("Unknown command: {c}");
+                        Ok(())
                     }
                 }
             };
         }
-        println!("\nFinished execution of the program.")
-    }
-
-    fn run_interpreter(&mut self, code: &str) {
-        let interpreter_config = InterpreterConfig::from(&self.cli);
-
-        let mut interpreter = Interpreter::new(code, interpreter_config, io::stdin(), io::stdout());
-
-        match interpreter.run(false) {
-            Ok(_) => println!("\nFinished execution of the program."),
-            Err(e) => {
-                println!("\nFatal error encountered: {}", e);
-                process::exit(0)
-            }
-        };
 
         if self.cli.memdump {
             println!("Memory Dump: {:?}", interpreter.mem_dump());
         }
+
+        println!("\nFinished execution of the program.");
+        Ok(())
     }
-}
 
-fn render_program(program: &Program, pc: usize) -> String {
-    format!("{program}\n{:>width$}^", "", width = pc)
-}
+    fn run_interpreter(&mut self, code: &str) -> Result<(), BrainfuckError> {
+        let interpreter_config = InterpreterConfig::from(&self.cli);
+        let mut interpreter = Self::create_interpreter(code, interpreter_config)?;
 
-fn render_memory(memory: &[u8], high_water: usize) -> String {
-    let values = memory
-        .iter()
-        .take(high_water + 1)
-        .map(u8::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
+        interpreter
+            .run()
+            .map_err(|e| BrainfuckError::from_runtime_error(e));
 
-    format!("[{values}]")
+        if self.cli.memdump {
+            println!("Memory Dump: {:?}", interpreter.mem_dump());
+        }
+        Ok(())
+    }
+
+    fn create_interpreter(
+        code: &str,
+        interpreter_config: InterpreterConfig,
+    ) -> Result<Interpreter<io::Stdin, io::Stdout>, BrainfuckError> {
+        Interpreter::new(code, interpreter_config, io::stdin(), io::stdout())
+            .map_err(|e| BrainfuckError::from_syntax_error(e))
+    }
+
+    fn handle_runtime_error(e: RuntimeError) -> ! {
+        eprintln!("\nFatal error encountered: {}", e);
+        process::exit(1)
+    }
+
+    fn handle_syntax_error(e: SyntaxError) -> ! {
+        eprintln!("\nFatal error encountered: {}", e);
+        process::exit(1)
+    }
+
+    fn render_program(program: &Program, pc: usize) -> String {
+        format!("{program}\n{:>width$}^", "", width = pc)
+    }
+
+    fn render_memory(memory: &[u8], high_water: usize) -> String {
+        let values = memory
+            .iter()
+            .take(high_water + 1)
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        format!("[{values}]")
+    }
 }

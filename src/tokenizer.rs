@@ -17,17 +17,23 @@ impl JumpTable {
                         jump_table.insert(i, *n);
                         stack.pop();
                     } else {
-                        panic!("Unmatched ']' at position={}", i)
+                        return Err(SyntaxError::UnmatchedLoopLeftBracket {
+                            position: i,
+                            symbol: ']',
+                        });
                     }
                 }
                 _ => {}
             }
         }
         if !stack.is_empty() {
-            panic!("Unmatched '[' at positions={:?}", stack);
+            return Err(SyntaxError::UnmatchedLoopLeftBracket {
+                position: stack.pop().unwrap(),
+                symbol: '[',
+            });
         }
 
-        jump_table
+        Ok(jump_table)
     }
 }
 
@@ -128,6 +134,7 @@ mod tokenizer_tests {
 mod jump_table_tests {
     use std::collections::HashMap;
 
+    use crate::error::SyntaxError;
     use crate::tokenizer::{JumpTable, Tokenizer};
 
     #[test]
@@ -141,20 +148,35 @@ mod jump_table_tests {
         expected.insert(7, 1);
         expected.insert(6, 2);
 
-        assert_eq!(expected, JumpTable::from(&Tokenizer::tokenize(code)));
+        assert_eq!(
+            expected,
+            JumpTable::from(&Tokenizer::tokenize(code)).unwrap()
+        );
     }
 
     #[test]
-    #[should_panic]
-    fn malformed_jump_table_panics1() {
-        let code = "[";
-        JumpTable::from(&Tokenizer::tokenize(code));
+    fn errors_on_unmatched_loop_close() {
+        let code = "+]+";
+
+        assert!(matches!(
+            JumpTable::from(&Tokenizer::tokenize(code)),
+            Err(SyntaxError::UnmatchedLoopLeftBracket {
+                position: 1,
+                symbol: ']'
+            })
+        ));
     }
 
     #[test]
-    #[should_panic]
-    fn malformed_jump_table_panics2() {
-        let code = "]";
-        JumpTable::from(&Tokenizer::tokenize(code));
+    fn errors_on_unmatched_loop_open() {
+        let code = "+[+";
+
+        assert!(matches!(
+            JumpTable::from(&Tokenizer::tokenize(code)),
+            Err(SyntaxError::UnmatchedLoopLeftBracket {
+                position: 1,
+                symbol: '['
+            })
+        ));
     }
 }

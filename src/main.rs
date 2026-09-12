@@ -8,8 +8,6 @@ mod tokenizer;
 use crate::cli::CliRunner;
 
 // TODO:
-// 2. Add CLI
-// 3. Add interactive Debug Mode
 // 4. Comments?
 
 fn main() {

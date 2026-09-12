@@ -3,9 +3,9 @@ use std::{
     io::{Read, Write},
 };
 
-use crate::program::Program;
 use crate::token::Token;
 use crate::{cli::InterpreterConfig, error::RuntimeError};
+use crate::{error::SyntaxError, program::Program};
 
 /// Stored at the current cell when `,` reads past the end of input.
 const EOF_BYTE: u8 = 0;
@@ -21,15 +21,20 @@ pub struct Interpreter<I: Read, O: Write> {
 }
 
 impl<I: Read, O: Write> Interpreter<I, O> {
-    pub fn new(program_code: &str, run_config: InterpreterConfig, input: I, output: O) -> Self {
-        Interpreter {
+    pub fn new(
+        program_code: &str,
+        run_config: InterpreterConfig,
+        input: I,
+        output: O,
+    ) -> Result<Self, SyntaxError> {
+        Ok(Interpreter {
             program_counter: 0,
             memory_pointer: 0,
             memory: vec![0u8; run_config.memsize],
-            program: Program::from(program_code),
+            program: Program::from(program_code)?,
             input,
             output,
-        }
+        })
     }
 
     pub fn handle_move_left(&mut self) -> Result<(), RuntimeError> {
@@ -192,13 +197,9 @@ impl<I: Read, O: Write> Interpreter<I, O> {
         }
     }
 
-    pub fn run(&mut self, mem_dump: bool) -> Result<(), RuntimeError> {
+    pub fn run(&mut self) -> Result<(), RuntimeError> {
         while self.has_instruction() {
             self.step()?;
-        }
-
-        if mem_dump {
-            println!("{:?}", self.memory);
         }
 
         Ok(())
@@ -233,7 +234,7 @@ mod interpreter_tests {
         input: I,
         output: O,
     ) -> Interpreter<I, O> {
-        Interpreter::new(code, InterpreterConfig::default(), input, output)
+        Interpreter::new(code, InterpreterConfig::default(), input, output).unwrap()
     }
 
     fn test_interpreter(code: &str) -> Interpreter<io::Empty, Vec<u8>> {
@@ -467,7 +468,7 @@ mod interpreter_tests {
         let mut interpreter = test_interpreter("<<<");
 
         assert!(matches!(
-            interpreter.run(false),
+            interpreter.run(),
             Err(RuntimeError::MemoryPointerOutOfBounds { .. })
         ));
     }
@@ -476,7 +477,7 @@ mod interpreter_tests {
     fn run_executes_loop_transfer_and_output() {
         let mut interpreter = test_interpreter("+++[>+<-]>.");
 
-        interpreter.run(false).unwrap();
+        interpreter.run().unwrap();
 
         assert_eq!(0, *interpreter.fetch_memory(0).unwrap());
         assert_eq!(3, *interpreter.fetch_memory(1).unwrap());
@@ -488,7 +489,7 @@ mod interpreter_tests {
         let mut interpreter =
             test_interpreter_with(",[.,]", Cursor::new(b"hi".to_vec()), Vec::new());
 
-        interpreter.run(false).unwrap();
+        interpreter.run().unwrap();
 
         assert_eq!(b"hi", interpreter.output.as_slice());
     }
@@ -497,7 +498,7 @@ mod interpreter_tests {
     fn run_skips_comments() {
         let mut interpreter = test_interpreter("++comment.");
 
-        interpreter.run(false).unwrap();
+        interpreter.run().unwrap();
 
         assert_eq!(b"\x02", interpreter.output.as_slice());
     }
@@ -506,7 +507,7 @@ mod interpreter_tests {
     fn run_prints_memory_dump_when_requested() {
         let mut interpreter = test_interpreter("++");
 
-        interpreter.run(true).unwrap();
+        interpreter.run().unwrap();
 
         assert_eq!(2, *interpreter.fetch_memory(0).unwrap());
     }
@@ -519,8 +520,16 @@ mod interpreter_tests {
         assert!(text.contains("Instruction: Increment"));
 
         let mut interpreter = test_interpreter("+");
-        interpreter.run(false).unwrap();
+        interpreter.run().unwrap();
         let text = format!("{interpreter}");
         assert!(text.contains("end of program"));
+    }
+
+    #[test]
+    fn new_errors_on_malformed_program() {
+        assert!(matches!(
+            Interpreter::new("[", InterpreterConfig::default(), io::empty(), Vec::new()),
+            Err(SyntaxError::UnmatchedLoopLeftBracket { .. })
+        ));
     }
 }

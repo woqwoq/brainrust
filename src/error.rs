@@ -1,8 +1,32 @@
-use std::fmt;
+use std::{fmt, io::Error};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum CliError {
+    Io(String),
+}
+impl fmt::Display for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(s) => {
+                write!(f, "Unexpected I/O Error: {s}")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum SyntaxError {
     UnmatchedLoopLeftBracket { position: usize, symbol: char },
+}
+
+impl fmt::Display for SyntaxError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnmatchedLoopLeftBracket { position, symbol } => {
+                write!(f, "Unmatched bracket for '{symbol}' at position={position}")
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -26,7 +50,7 @@ impl fmt::Display for RuntimeError {
             Self::MemoryPointerOutOfBounds { pc, pointer } => {
                 write!(
                     f,
-                    "memory pointer {pointer} will go out out of bounds at pc={pc}"
+                    "memory pointer {pointer} will go out of bounds at pc={pc}"
                 )
             }
             Self::MemoryAccessOutOfBounds { cell, tape_size } => {
@@ -49,6 +73,40 @@ impl std::error::Error for RuntimeError {
             Self::Io(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+pub enum BrainfuckError {
+    SyntaxError(SyntaxError),
+    RuntimeError(RuntimeError),
+    CliError(CliError),
+}
+
+impl BrainfuckError {
+    pub fn from_syntax_error(e: SyntaxError) -> Self {
+        Self::SyntaxError(e)
+    }
+
+    pub fn from_runtime_error(e: RuntimeError) -> Self {
+        Self::RuntimeError(e)
+    }
+}
+
+#[cfg(test)]
+mod syntax_error_test {
+    use crate::error::SyntaxError;
+
+    #[test]
+    fn fmt_unmatched_loop_left_bracket_err() {
+        let syntax_error = SyntaxError::UnmatchedLoopLeftBracket {
+            position: 3,
+            symbol: '[',
+        };
+
+        assert_eq!(
+            "Unmatched bracket for '[' at position=3",
+            format!("{syntax_error}")
+        );
     }
 }
 
@@ -91,7 +149,7 @@ mod runtime_error_test {
         let runtime_error = RuntimeError::MemoryPointerOutOfBounds { pc: 0, pointer: 0 };
 
         assert_eq!(
-            "memory pointer 0 will go out out of bounds at pc=0",
+            "memory pointer 0 will go out of bounds at pc=0",
             format!("{}", runtime_error)
         );
     }
