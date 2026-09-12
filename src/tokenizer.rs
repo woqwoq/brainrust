@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::token::Token;
+use crate::{error::SyntaxError, token::Token};
 
 pub struct JumpTable {}
 impl JumpTable {
-    pub fn from(tokens: &[Token]) -> HashMap<usize, usize> {
+    pub fn from(tokens: &[Token]) -> Result<HashMap<usize, usize>, SyntaxError> {
         let mut stack: Vec<usize> = Vec::new();
         let mut jump_table = HashMap::new();
 

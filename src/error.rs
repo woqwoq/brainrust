@@ -1,6 +1,11 @@
 use std::fmt;
 
 #[derive(Debug)]
+pub enum SyntaxError {
+    UnmatchedLoopLeftBracket { position: usize, symbol: char },
+}
+
+#[derive(Debug)]
 pub enum RuntimeError {
     /// `<` at cell 0 or `>` past the last cell.
     MemoryPointerOutOfBounds { pc: usize, pointer: usize },

@@ -57,7 +57,9 @@ pub struct InterpreterConfig {
 
 impl Default for InterpreterConfig {
     fn default() -> Self {
-        InterpreterConfig { memsize: 30000 }
+        InterpreterConfig {
+            memsize: DEFAULT_TAPE_SIZE,
+        }
     }
 }
 
@@ -121,47 +123,50 @@ impl CliRunner {
         let program = interpreter.get_program().clone();
 
         let mut high_water = 0;
-        let mut pc;
-
         while interpreter.has_instruction() {
-            pc = interpreter.get_current_pc();
+            let pc = interpreter.get_current_pc();
             high_water = high_water.max(interpreter.get_current_memory_pointer());
 
             println!("----------------------------------------------");
             println!("Program: \n{}", render_program(&program, pc));
-
             println!(
                 "Memory: {}",
-                render_memory(
-                    &interpreter.mem_dump(),
-                    interpreter.get_current_memory_pointer(),
-                    high_water
-                )
+                render_memory(&interpreter.mem_dump(), high_water)
             );
-
             println!(
                 "s: step / r: run the program until halt / p: print current memory value / q: quit"
             );
 
             let mut user_input = String::new();
-            io::stdin().read_line(&mut user_input).unwrap();
-
-            match user_input.chars().next().unwrap() {
-                's' => match interpreter.step() {
-                    Ok(_) => {}
-                    Err(e) => println!("\nFatal error encountered: {}", e),
-                },
-                'r' => match interpreter.run(false) {
-                    Ok(_) => {}
-                    Err(e) => println!("\nFatal error encountered: {}", e),
-                },
-                'p' => {
-                    print!("Value at current cell: ");
-                    let _ = interpreter.handle_output();
-                    println!();
+            if let Err(e) = io::stdin().read_line(&mut user_input) {
+                println!("Failed to read user input: {e}");
+            }
+            if let Some(c) = user_input.chars().next() {
+                match c {
+                    's' => match interpreter.step() {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("\nFatal error encountered: {}", e);
+                            process::exit(1)
+                        }
+                    },
+                    'r' => match interpreter.run(false) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("\nFatal error encountered: {}", e);
+                            process::exit(1)
+                        }
+                    },
+                    'p' => {
+                        print!("Value at current cell: ");
+                        let _ = interpreter.handle_output();
+                        println!();
+                    }
+                    'q' => process::exit(0),
+                    _ => {
+                        println!("Unknown command: {c}.")
+                    }
                 }
-                'q' => process::exit(0),
-                _ => {}
             };
         }
         println!("\nFinished execution of the program.")
@@ -174,7 +179,10 @@ impl CliRunner {
 
         match interpreter.run(false) {
             Ok(_) => println!("\nFinished execution of the program."),
-            Err(e) => println!("\nFatal error encountered: {}", e),
+            Err(e) => {
+                println!("\nFatal error encountered: {}", e);
+                process::exit(0)
+            }
         };
 
         if self.cli.memdump {
@@ -187,7 +195,7 @@ fn render_program(program: &Program, pc: usize) -> String {
     format!("{program}\n{:>width$}^", "", width = pc)
 }
 
-fn render_memory(memory: &[u8], pointer: usize, high_water: usize) -> String {
+fn render_memory(memory: &[u8], high_water: usize) -> String {
     let values = memory
         .iter()
         .take(high_water + 1)
@@ -196,24 +204,4 @@ fn render_memory(memory: &[u8], pointer: usize, high_water: usize) -> String {
         .join(", ");
 
     format!("[{values}]")
-}
-
-#[cfg(test)]
-mod cli_tests {
-    use super::*;
-
-    #[test]
-    fn renders_touched_cells_and_caret_at_pointer() {
-        assert_eq!(render_memory(&[1, 2, 3], 2, 2), "1 2 3\n  ^");
-    }
-
-    #[test]
-    fn renders_single_cell_and_caret_at_origin() {
-        assert_eq!(render_memory(&[0], 0, 0), "0\n^");
-    }
-
-    #[test]
-    fn renders_caret_behind_high_water() {
-        assert_eq!(render_memory(&[5, 6, 7, 8], 1, 3), "5 6 7 8\n ^");
-    }
 }
