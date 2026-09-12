@@ -5,7 +5,7 @@ use std::{
     process,
 };
 
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 
 use crate::{
     error::{BrainfuckError, CliError},
@@ -17,13 +17,18 @@ const DEFAULT_TAPE_SIZE: usize = 500;
 
 #[derive(Parser)]
 #[command(about = "A CLI Brainfuck interpreter.")]
+#[command(group(
+    ArgGroup::new("input")
+        .required(true)
+        .args(&["file", "inline_program"]),
+))]
 pub struct Cli {
     /// Path to program file
-    #[arg(short, long, value_name = "FILE", group = "input")]
+    #[arg(short, long, value_name = "FILE")]
     pub file: Option<PathBuf>,
 
     /// Run BF code directly from user's input
-    #[arg(short, long, value_name = "CODE", group = "input")]
+    #[arg(short, long, value_name = "CODE")]
     pub inline_program: Option<String>,
 
     /// Optional parameter to enable interactive step-by-step mode (DEBUG)
