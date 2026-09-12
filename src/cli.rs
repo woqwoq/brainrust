@@ -8,7 +8,7 @@ use std::{
 use clap::Parser;
 
 use crate::{
-    error::{BrainfuckError, CliError, RuntimeError, SyntaxError},
+    error::{BrainfuckError, CliError},
     interpreter::Interpreter,
     program::Program,
 };
@@ -84,35 +84,55 @@ impl CliRunner {
         CliRunner { cli: Cli::parse() }
     }
 
-    pub fn run(&mut self) -> Result<(), BrainfuckError> {
+    pub fn execute(&mut self) {
+        if let Err(e) = self.run() {
+            Self::handle_bf_error(e);
+        }
+    }
+
+    fn handle_bf_error(e: BrainfuckError) -> ! {
+        eprintln!("\nFatal error encountered: {}", e);
+        process::exit(1)
+    }
+
+    fn read_code_from_file(file_path: &PathBuf) -> Result<String, BrainfuckError> {
         let mut code = String::new();
-        if let Some(file_path) = &self.cli.file {
-            if !file_path.exists() {
-                return Err(BrainfuckError::CliError(CliError::Io(format!(
-                    "Error: File '{}' does not exist.",
-                    file_path.to_str().unwrap()
-                ))));
-            }
 
-            match File::open(file_path) {
-                Ok(mut file) => {
-                    let _ = file.read_to_string(&mut code).unwrap();
+        if !file_path.exists() {
+            return Err(BrainfuckError::Cli(CliError::Io(format!(
+                "Error: File '{}' does not exist.",
+                file_path.to_str().unwrap()
+            ))));
+        }
 
-                    if code.is_empty() {
-                        return Err(BrainfuckError::CliError(CliError::Io(format!(
-                            "Error: File '{}' is empty.",
-                            file_path.to_str().unwrap()
-                        ))));
-                    }
-                }
-                Err(e) => {
-                    return Err(BrainfuckError::CliError(CliError::Io(format!(
-                        "Error: Failed to open File '{}' with error: {}",
-                        file_path.to_str().unwrap(),
-                        e
+        match File::open(file_path) {
+            Ok(mut file) => {
+                let _ = file.read_to_string(&mut code)?;
+
+                if code.is_empty() {
+                    return Err(BrainfuckError::Cli(CliError::Io(format!(
+                        "Error: File '{}' is empty.",
+                        file_path.to_str().unwrap()
                     ))));
                 }
             }
+            Err(e) => {
+                return Err(BrainfuckError::Cli(CliError::Io(format!(
+                    "Error: Failed to open File '{}' with error: {}",
+                    file_path.to_str().unwrap(),
+                    e
+                ))));
+            }
+        }
+
+        Ok(code)
+    }
+
+    pub fn run(&mut self) -> Result<(), BrainfuckError> {
+        let mut code = String::new();
+
+        if let Some(file_path) = &self.cli.file {
+            code = Self::read_code_from_file(file_path)?;
         }
 
         if let Some(inline_code) = &self.cli.inline_program {
@@ -147,30 +167,28 @@ impl CliRunner {
             );
 
             let mut user_input = String::new();
-            if let Err(e) = io::stdin().read_line(&mut user_input) {
-                println!("Failed to read user input: {e}");
-            }
-            if let Some(c) = user_input.chars().next() {
-                match c {
-                    's' => interpreter
-                        .step()
-                        .map_err(|e| BrainfuckError::from_runtime_error(e)),
-                    'r' => interpreter
-                        .step()
-                        .map_err(|e| BrainfuckError::from_runtime_error(e)),
+            io::stdin().read_line(&mut user_input)?;
+
+            match user_input.chars().next() {
+                Some(c) => match c {
+                    's' => interpreter.step()?,
+                    'r' => interpreter.run()?,
                     'p' => {
                         print!("Value at current cell: ");
-                        let _ = interpreter.handle_output();
+                        interpreter.handle_output()?;
                         println!();
-                        Ok(())
                     }
                     'q' => process::exit(0),
                     _ => {
                         println!("Unknown command: {c}");
-                        Ok(())
                     }
+                },
+                None => {
+                    return Err(BrainfuckError::Cli(CliError::Io(String::from(
+                        "input ended unexpectedly",
+                    ))));
                 }
-            };
+            }
         }
 
         if self.cli.memdump {
@@ -185,9 +203,7 @@ impl CliRunner {
         let interpreter_config = InterpreterConfig::from(&self.cli);
         let mut interpreter = Self::create_interpreter(code, interpreter_config)?;
 
-        interpreter
-            .run()
-            .map_err(|e| BrainfuckError::from_runtime_error(e));
+        interpreter.run()?;
 
         if self.cli.memdump {
             println!("Memory Dump: {:?}", interpreter.mem_dump());
@@ -200,17 +216,7 @@ impl CliRunner {
         interpreter_config: InterpreterConfig,
     ) -> Result<Interpreter<io::Stdin, io::Stdout>, BrainfuckError> {
         Interpreter::new(code, interpreter_config, io::stdin(), io::stdout())
-            .map_err(|e| BrainfuckError::from_syntax_error(e))
-    }
-
-    fn handle_runtime_error(e: RuntimeError) -> ! {
-        eprintln!("\nFatal error encountered: {}", e);
-        process::exit(1)
-    }
-
-    fn handle_syntax_error(e: SyntaxError) -> ! {
-        eprintln!("\nFatal error encountered: {}", e);
-        process::exit(1)
+            .map_err(BrainfuckError::from)
     }
 
     fn render_program(program: &Program, pc: usize) -> String {

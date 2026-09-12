@@ -1,4 +1,4 @@
-use std::{fmt, io::Error};
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub enum CliError {
@@ -77,18 +77,40 @@ impl std::error::Error for RuntimeError {
 }
 
 pub enum BrainfuckError {
-    SyntaxError(SyntaxError),
-    RuntimeError(RuntimeError),
-    CliError(CliError),
+    Syntax(SyntaxError),
+    Runtime(RuntimeError),
+    Cli(CliError),
 }
 
-impl BrainfuckError {
-    pub fn from_syntax_error(e: SyntaxError) -> Self {
-        Self::SyntaxError(e)
+impl fmt::Display for BrainfuckError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BrainfuckError::Syntax(s) => s.to_string(),
+                BrainfuckError::Runtime(r) => r.to_string(),
+                BrainfuckError::Cli(e) => e.to_string(),
+            }
+        )
     }
+}
 
-    pub fn from_runtime_error(e: RuntimeError) -> Self {
-        Self::RuntimeError(e)
+impl From<SyntaxError> for BrainfuckError {
+    fn from(e: SyntaxError) -> Self {
+        Self::Syntax(e)
+    }
+}
+
+impl From<RuntimeError> for BrainfuckError {
+    fn from(e: RuntimeError) -> Self {
+        Self::Runtime(e)
+    }
+}
+
+impl From<std::io::Error> for BrainfuckError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Cli(CliError::Io(e.to_string()))
     }
 }
 

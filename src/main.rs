@@ -13,5 +13,5 @@ use crate::cli::CliRunner;
 fn main() {
     let mut cli_runner = CliRunner::new();
 
-    cli_runner.run();
+    cli_runner.execute();
 }
